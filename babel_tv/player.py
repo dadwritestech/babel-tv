@@ -102,6 +102,23 @@ def cue_ass(text: str, source: str | None = None, font: str = FONT) -> str:
     return small + main
 
 
+CATCHUP_SPEED = 1.1     # scaletempo keeps pitch; barely noticeable on speech
+CATCHUP_START_S = 1.5   # start catching up when this far behind the target delay
+CATCHUP_STOP_S = 0.3    # ...and stop once back within this
+
+
+def catchup_speed(view_delay: float, target: float, current: float) -> float:
+    """Playback speed that pulls a drifting picture back to `target` seconds behind live.
+
+    mpv's cache-pause re-buffers after every underrun, and HLS underruns often, so
+    the delay creeps up (seen: 15 s instead of 5). Hysteresis keeps it from flapping.
+    """
+    over = view_delay - target
+    if current > 1.0:
+        return 1.0 if over <= CATCHUP_STOP_S else current
+    return CATCHUP_SPEED if over >= CATCHUP_START_S else 1.0
+
+
 class MpvPlayer:
     def __init__(self, delay: float, title: str = "babel-tv", show_source: bool = True,
                  extra_args: list[str] | None = None, mpv: str | None = None):
@@ -128,6 +145,9 @@ class MpvPlayer:
              "--force-window=immediate", "--keep-open=no", "--osd-level=1",
              "--force-seekable=no", "--cache=yes", "--cache-secs=120",
              "--cache-pause-initial=yes", f"--cache-pause-wait={self.delay}",
+             # Reserve a band under the picture so subtitles never cover the
+             # channel's own tickers and lower thirds (news channels have many).
+             "--video-margin-ratio-bottom=0.2", "--autofit=1280x720", "--background-color=#000000",
              "--terminal=no", *self.extra_args],
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         threading.Thread(target=self._accept, args=(relay,), daemon=True).start()
@@ -184,6 +204,7 @@ class MpvPlayer:
             return
         last = None
         n = 0
+        speed = 1.0
         while not self._stop.is_set():
             try:
                 pos = ipc.command("get_property", "time-pos")
@@ -191,7 +212,14 @@ class MpvPlayer:
                     n += 1
                     arrived = self.pipeline.clock.wall_at(pos)
                     if arrived is not None and n % 10 == 0:
-                        self.pipeline.view_delays.append(time.monotonic() - arrived)
+                        vd = time.monotonic() - arrived
+                        self.pipeline.view_delays.append(vd)
+                        new = catchup_speed(vd, self.delay, speed)
+                        if new != speed:
+                            ipc.command("set_property", "speed", new)
+                            speed = new
+                        if speed > 1.0:
+                            self.pipeline.catchup_s += 0.5
                     cue = self.pipeline.track.active(pos)
                     key = id(cue) if cue else None
                     if key != last:

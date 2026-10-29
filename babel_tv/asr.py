@@ -36,6 +36,31 @@ def is_hallucination(text: str, no_speech_prob: float = 0.0, avg_logprob: float 
     return False
 
 
+def _core(text: str) -> str:
+    return normalize(text).strip(" .…。,!?¿¡\"'")
+
+
+class RepeatGuard:
+    """Drop a chunk that repeats a recent one.
+
+    Feeding the previous text as `initial_prompt` helps continuity, but on music or
+    crowd noise whisper copies the prompt instead: seen live on DW Espanol as
+    "...la relación." sixteen times in a row.
+    """
+
+    def __init__(self, window: int = 3):
+        self.window = window
+        self._recent: list[str] = []
+
+    def is_repeat(self, text: str) -> bool:
+        core = _core(text)
+        if not core:
+            return False
+        rep = core in self._recent
+        self._recent = (self._recent + [core])[-self.window:]
+        return rep
+
+
 class LanguageLock:
     """Per-chunk language ID on 2 s of audio is noisy; vote, then lock."""
 
@@ -68,6 +93,7 @@ class ASR:
             # No CUDA, or no VRAM left: CPU int8 still runs small models live.
             self.model = WhisperModel(model, device="cpu", compute_type="int8")
         self.lock = LanguageLock(language)
+        self.repeats = RepeatGuard()
         self._prev = ""
 
     def transcribe(self, audio: np.ndarray) -> tuple[str, str | None]:
@@ -80,6 +106,9 @@ class ASR:
         kept = [s.text.strip() for s in segs
                 if not is_hallucination(s.text, s.no_speech_prob, s.avg_logprob, s.compression_ratio)]
         text = " ".join(kept).strip()
+        if text and self.repeats.is_repeat(text):
+            self._prev = ""          # the prompt is what keeps the loop going
+            text = ""
         if text:
             self._prev = (self._prev + " " + text)[-400:]
         return text, self.lock.lang or info.language

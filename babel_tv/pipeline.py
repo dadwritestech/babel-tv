@@ -110,7 +110,7 @@ class Pipeline:
     def __init__(self, url: str, asr, translator, *, channel: Channel | None = None,
                  delay: float = 5.0, player=None, duration: float | None = None,
                  out_dir: Path | None = None, chunker: Chunker | None = None,
-                 realtime_files: bool = True, log=print):
+                 realtime_files: bool = True, save_audio: bool = False, log=print):
         self.url = url
         self.channel = channel
         self.asr = asr
@@ -121,6 +121,14 @@ class Pipeline:
         self.out_dir = out_dir
         self.chunker = chunker or Chunker()
         self.realtime_files = realtime_files
+        self._wav = None
+        if save_audio and out_dir:
+            import wave
+            out_dir.mkdir(parents=True, exist_ok=True)
+            self._wav = wave.open(str(out_dir / "audio.wav"), "wb")
+            self._wav.setnchannels(1)
+            self._wav.setsampwidth(2)
+            self._wav.setframerate(SR)
         self.log = log
         self.track = CueTrack()
         self.metrics: list[CueMetric] = []
@@ -130,6 +138,7 @@ class Pipeline:
         self.stop = threading.Event()
         self.t0: float | None = None
         self.view_delays: list[float] = []   # wall(now) - arrival(time-pos), from the player
+        self.catchup_s = 0.0                 # wall seconds the player spent speeding up
         self.errors: list[str] = []
 
     # -- stages ------------------------------------------------------------
@@ -144,6 +153,8 @@ class Pipeline:
             if self.t0 is None:
                 self.t0 = now
             total += len(data) // 2
+            if self._wav:
+                self._wav.writeframes(data)
             self.clock.mark(total, now)
             frames = fb.push(data)
             if len(frames):
@@ -248,11 +259,15 @@ class Pipeline:
             "segment_median_s": pct([m.end - m.start for m in ms], 0.5),
             "forced_cuts": sum(m.forced for m in ms),
             "view_delay_median_s": round(statistics.median(self.view_delays), 2) if self.view_delays else None,
+            "view_delay_p95_s": pct(self.view_delays, 0.95) if self.view_delays else None,
+            "catchup_s": round(self.catchup_s, 1),
             "languages": sorted({m.lang for m in ms if m.lang}),
             "errors": self.errors[-10:],
         }
 
     def finish(self) -> dict:
+        if self._wav:
+            self._wav.close()
         s = self.summary()
         if self.out_dir:
             self.out_dir.mkdir(parents=True, exist_ok=True)

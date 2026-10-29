@@ -93,10 +93,19 @@ def build_pipeline(a, url, ch):
                            show_source=not a.no_source)
     out = Path(a.out) if a.out else Path("runs") / time.strftime("%Y%m%d-%H%M%S")
     return Pipeline(url, asr, tr, channel=ch, delay=a.delay, player=player,
-                    duration=a.duration, out_dir=out, chunker=Chunker(max_s=a.max_chunk))
+                    duration=a.duration, out_dir=out, chunker=Chunker(max_s=a.max_chunk),
+                    save_audio=a.save_audio)
+
+
+def source_language(a) -> str | None:
+    # --from wins. Otherwise, if the channel came from iptv-org's per-language list,
+    # we already know what it speaks: whisper's auto-detect is unreliable on Telugu
+    # (it writes it in Latin script and labels it en/tr/ta).
+    return a.source_lang or getattr(a, "language", None)
 
 
 def run_play(a, url, ch) -> None:
+    a.source_lang = source_language(a)
     p = build_pipeline(a, url, ch)
     print(f"playing {ch.name if ch else url}  ->  {LANGS.get(a.to, a.to)} "
           f"(delay {a.delay}s; Ctrl+C to stop)", flush=True)
@@ -129,6 +138,7 @@ def add_play(p):
     p.add_argument("--no-source", action="store_true", help="hide the original-language line")
     p.add_argument("--duration", type=float, help="stop after this many seconds of audio")
     p.add_argument("--out", help="run directory for subs.srt / cues.jsonl / summary.json")
+    p.add_argument("--save-audio", action="store_true", help="keep audio.wav in the run dir")
     p.add_argument("--max-chunk", type=float, default=3.0, help="longest speech chunk, seconds")
     p.add_argument("--asr-model", default="large-v3-turbo")
     p.add_argument("--device", default="cuda")
