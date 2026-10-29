@@ -1,2 +1,0 @@
-[console_scripts]
-babel-tv = babel_tv.cli:main

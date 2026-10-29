@@ -3,3 +3,4 @@ runs/
 scratch/
 __pycache__/
 *.pyc
+*.egg-info/
