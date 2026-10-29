@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: babel-tv
+Version: 0.1.0
+Summary: Watch any public TV channel with live, fully local translated subtitles.
+Requires-Python: >=3.10
+Requires-Dist: faster-whisper>=1.1
+Requires-Dist: numpy
+Provides-Extra: test
+Requires-Dist: pytest; extra == "test"
