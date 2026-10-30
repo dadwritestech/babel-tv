@@ -1,0 +1,51 @@
+# herald: posts this repo's news (new data, releases, gallery entries) to X, Bluesky and Mastodon.
+# Off until the repo variable HERALD_ENABLED is "true". Platforms with no secrets are skipped.
+name: herald
+
+on:
+  schedule:
+    - cron: "41 18 * * *"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: herald
+  cancel-in-progress: false
+
+jobs:
+  post:
+    if: vars.HERALD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: post
+        shell: bash
+        env:
+          HERALD_X_API_KEY: ${{ secrets.HERALD_X_API_KEY }}
+          HERALD_X_API_SECRET: ${{ secrets.HERALD_X_API_SECRET }}
+          HERALD_X_ACCESS_TOKEN: ${{ secrets.HERALD_X_ACCESS_TOKEN }}
+          HERALD_X_ACCESS_SECRET: ${{ secrets.HERALD_X_ACCESS_SECRET }}
+          HERALD_BSKY_HANDLE: ${{ vars.HERALD_BSKY_HANDLE }}
+          HERALD_BSKY_APP_PASSWORD: ${{ secrets.HERALD_BSKY_APP_PASSWORD }}
+          HERALD_MASTODON_URL: ${{ vars.HERALD_MASTODON_URL }}
+          HERALD_MASTODON_TOKEN: ${{ secrets.HERALD_MASTODON_TOKEN }}
+        run: python .herald/feed.py | python .herald/herald.py --repo babel-tv --post --min-gap-hours 20
+      - name: save state
+        if: always()
+        run: |
+          git config user.name "herald-bot"
+          git config user.email "herald-bot@users.noreply.github.com"
+          git add .herald/state.json 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "herald: record posts"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
