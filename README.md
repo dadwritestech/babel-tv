@@ -207,3 +207,7 @@ language-hint plumbing.
 - Fall back to showing the source line when translation misses the delay, instead of
   showing nothing.
 - Dubbing: needs a TTS with Telugu and Hindi voices (Indic Parler-TTS, or IndicF5).
+
+## License
+
+[AGPL-3.0](LICENSE). Self-hosting is free; if you run a modified version as a service, share your changes.
